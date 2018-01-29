@@ -22,12 +22,17 @@ import (
 const baseUrl = "http://www.mzitu.com/"
 
 var (
-	rwg       sync.WaitGroup
-	basePath  string
-	cFlag     int
-	cPage     int
+	rwg      sync.WaitGroup
+	basePath string
+	cFlag    int
+	cPage    int
+
+	// 频道
 	flagLabel = []string{
 		"",
+		"hot",
+		"best",
+		"zhuanti",
 		"xinggan",
 		"japan",
 		"taiwan",
@@ -35,13 +40,18 @@ var (
 		"zipai",
 	}
 	flagDesc = []string{
-		"首页推荐",
+		"最新",
+		"最热",
+		"推荐",
+		"专题",
 		"性感妹子",
 		"日本妹子",
 		"台湾妹子",
 		"清纯妹子",
 		"妹子自拍",
 	}
+
+	// 浏览器代理
 	userAgents = []string{
 		"Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; AcooBrowser; .NET CLR 1.1.4322; .NET CLR 2.0.50727)",
 		"Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; Acoo Browser; SLCC1; .NET CLR 2.0.50727; Media Center PC 5.0; .NET CLR 3.0.04506)",
@@ -60,18 +70,28 @@ var (
 		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_3) AppleWebKit/535.20 (KHTML, like Gecko) Chrome/19.0.1036.7 Safari/535.20",
 		"Opera/9.80 (Macintosh; Intel Mac OS X 10.6.8; U; fr) Presto/2.9.168 Version/11.52",
 	}
+
 	userAgentsLen = len(userAgents)
+
+	flagLen = len(flagDesc)
+
+	// 失败重试最大次数
+	maxRetry = 2
 )
 
+type Task struct {
+	Url     string
+	Referer string
+	Retry   int
+	Folder  string
+}
+
 func main() {
-
-	l := len(flagDesc)
-
 	fmt.Println("\n欢迎使用《极速漂移》，本程序由 Golang 强力驱动。\n希望本程序能给您的生活带来光明与希望！")
 	fmt.Println("\n\n请输入图片保存目录路径和内容抓取类别，默认为首页推荐 ")
 	fmt.Print("\r\n\r\n")
 
-	for i := 0; i < l; i++ {
+	for i := 0; i < flagLen; i++ {
 		fmt.Println(i, " - ", flagDesc[i])
 	}
 
@@ -103,52 +123,66 @@ func main() {
 	fmt.Println("请输入起始抓取页码（数字）：")
 	fmt.Scanln(&cPage)
 
-	if cFlag < 0 || cFlag > l-1 {
+	if cFlag < 0 || cFlag > flagLen-1 {
 		cFlag = 0
 	}
 
-	path := flagLabel[cFlag]
+	p := flagLabel[cFlag]
 	url := baseUrl
 
-	if path != "" {
-		url += "/" + path
+	if p != "" {
+		url += p + "/"
 	}
 
 	if cPage > 0 {
-		url += "/page/" + strconv.Itoa(cPage)
+		url += "page/" + strconv.Itoa(cPage)
 	}
 
-	log.Println("MM Spider start!")
-	execute(url, "")
-	log.Println("MM Spider shutdown!")
+	log.Println("Task start!")
+	err := execute(&Task{
+		Url:    url,
+		Folder: filterFilename(flagDesc[cFlag]),
+	})
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	log.Println("Task shutdown!")
+	log.Println("Press <Enter> key to exit...")
+	fmt.Scan()
+	os.Exit(0)
 }
 
-func execute(url string, referer string) {
-	resp, err := request(url, referer)
+func execute(task *Task) error {
+	resp, err := request(task)
 
 	if err != nil {
-		return
+		if err = retry(task); err != nil {
+			return fmt.Errorf("request %s failed, %v", task.Url, err)
+		}
+		return nil
 	}
 
 	doc, err := goquery.NewDocumentFromResponse(resp)
 
 	if err != nil {
-		log.Println("Parse page failed, SKIP! ", url, err.Error())
-		return
+		if err = retry(task); err != nil {
+			return fmt.Errorf("parse page failed, SKIP! %s, %v", task.Url, err.Error())
+		}
+		return nil
 	}
 
 	var currentNode *goquery.Selection
 
 	if currentNode = doc.Find(".main-image"); currentNode.Size() > 0 {
-		imgUrl, err := currentNode.Find("p img").Attr("src")
+		imgUrl, _ := currentNode.Find("p img").Attr("src")
 		desc, _ := currentNode.Find("p img").Attr("alt")
-
-		if err && imgUrl != "" {
-			saveImage(url, imgUrl, desc)
+		if imgUrl != "" {
+			saveImage(task.Url, imgUrl, filepath.Join(task.Folder, filterFilename(desc)))
 		}
 
-		selection := doc.Find(".pagenavi").Find("a").Last()
 		var nextUrl string
+		selection := doc.Find(".pagenavi").Find("a").Last()
 
 		text := selection.Find("span").Text()
 
@@ -156,19 +190,46 @@ func execute(url string, referer string) {
 			nextUrl, _ = selection.Attr("href")
 		}
 		if nextUrl == "" {
-			return
+			return nil
 		}
+
 		time.Sleep(time.Duration(1) * time.Second)
-		execute(nextUrl, "")
+
+		err = execute(&Task{
+			Url:    nextUrl,
+			Folder: task.Folder,
+		})
 	} else if currentNode = doc.Find(".postlist"); currentNode.Size() > 0 {
+		if tags := currentNode.Find("dl.tags"); tags.Size() > 0 {
+			curTitle := ""
+			tags.Children().Each(func(i int, s *goquery.Selection) {
+				if s.Is("dt") {
+					curTitle = s.Text()
+					return
+				}
+				a := s.Find("a")
+				tagLink, _ := a.Attr("href")
+				tagAlt := a.Text()
+				if tagLink != "" {
+					e := execute(&Task{
+						Url:    tagLink,
+						Folder: filepath.Join(task.Folder, filterFilename(curTitle), filterFilename(tagAlt)),
+					})
+
+					if e != nil {
+						fmt.Println(e.Error())
+					}
+				}
+			})
+			return nil
+		}
+
 		var index = 0
 		var nextPage string
-
 		currentNode.Children().Each(func(i int, s *goquery.Selection) {
 			if index == 0 {
 				s.Find("li>a").Each(func(idx int, sel *goquery.Selection) {
 					detailUrl, exists := sel.Attr("href")
-
 					if !exists || detailUrl == "" {
 						return
 					}
@@ -180,7 +241,14 @@ func execute(url string, referer string) {
 						defer rwg.Done()
 						// 缓冲执行协程，防止过快一起执行
 						time.Sleep(time.Duration(i) * time.Second)
-						execute(detailUrl, "")
+
+						e := execute(&Task{
+							Url:    detailUrl,
+							Folder: task.Folder,
+						})
+						if e != nil {
+							fmt.Println(e.Error())
+						}
 					}()
 				})
 			} else if index == 1 {
@@ -190,22 +258,26 @@ func execute(url string, referer string) {
 		})
 
 		if nextPage == "" {
-			log.Println("Page end!", url)
-			return
+			log.Println("Page end!", task.Url)
+			return nil
 		}
 
 		rwg.Wait()
 		log.Println("Next page ", nextPage)
-		execute(nextPage, "")
+		err = execute(&Task{
+			Url:    nextPage,
+			Folder: task.Folder,
+		})
 	} else {
-		log.Println("Invalid page ", url)
+		return retry(task)
 	}
+
+	return err
 }
 
-func request(url string, referer string) (*http.Response, error) {
+func request(task *Task) (*http.Response, error) {
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-
+	req, err := http.NewRequest("GET", task.Url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -214,10 +286,9 @@ func request(url string, referer string) (*http.Response, error) {
 
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.8")
 	req.Header.Set("User-Agent", userAgents[r.Intn(userAgentsLen)])
-
-	if referer != "" {
+	if task.Referer != "" {
 		req.Header.Set("Accept", "image/webp,image/*,*/*;q=0.8")
-		req.Header.Set("Referer", referer)
+		req.Header.Set("Referer", task.Referer)
 	} else {
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 		req.Header.Set("Cache-Control", "max-age=0")
@@ -237,56 +308,63 @@ func saveImage(pageUrl string, imgUrl string, folder string) {
 		return
 	}
 
-	if folder != "" {
-		// 过滤非法文件名
-		reg, err := regexp.Compile("[\\\\/:*?\"<>|]")
-		if err != nil {
-			return
-		}
-		folder = reg.ReplaceAllString(folder, "_")
-	}
-
-	folder = fragments[0] + "_" + strings.TrimSpace(folder)
+	folder = strings.TrimSpace(folder) + "_" + fragments[0]
 
 	if fragLen > 1 {
 		idx = fragments[1]
 	}
 
-	path := filepath.Join(basePath, flagDesc[cFlag], folder)
-	err := os.MkdirAll(path, 0777)
-
+	p := filepath.Join(basePath, folder)
+	err := os.MkdirAll(p, 0777)
 	if err != nil {
-		log.Println("Create directory failed! ", path, err.Error())
+		log.Println("Create directory failed! ", p, err.Error())
 		return
 	}
 
 	ext := filepath.Ext(imgUrl)
-	path = filepath.Join(path, idx+ext)
-
-	resp, err := request(imgUrl, pageUrl)
-
+	p = filepath.Join(p, idx+ext)
+	resp, err := request(&Task{
+		Url:     imgUrl,
+		Referer: pageUrl,
+	})
 	if err != nil {
 		return
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
-
 	if err != nil {
 		return
 	}
 
-	out, err := os.Create(path)
-
+	out, err := os.Create(p)
 	if err != nil {
 		log.Println("Create file failed! ", err.Error())
 		return
 	}
 
 	_, err = io.Copy(out, bytes.NewReader(body))
-
 	if err != nil {
 		log.Println("Save file failed! ", err.Error())
 	} else {
-		log.Println("Saved file: ", path)
+		log.Println("Saved file: ", p)
 	}
+}
+
+func retry(task *Task) error {
+	if task.Retry < maxRetry {
+		task.Retry++
+		time.Sleep(time.Duration(2) * time.Second)
+		return execute(task)
+	}
+	return fmt.Errorf("invalid page %s", task.Url)
+}
+
+// 过滤非法文件名
+func filterFilename(name string) string {
+	name = strings.TrimSpace(name)
+	reg, err := regexp.Compile("[\\\\/:*?\"<>|]")
+	if err != nil {
+		return name
+	}
+	return reg.ReplaceAllString(name, "_")
 }
