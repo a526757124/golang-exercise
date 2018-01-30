@@ -87,7 +87,7 @@ type Task struct {
 }
 
 func main() {
-	fmt.Println("\n欢迎使用《极速漂移》，本程序由 Golang 强力驱动。\n希望本程序能给您的生活带来光明与希望！")
+	fmt.Println("\n欢迎使用《司机之友》，本程序由 Golang 强力驱动。")
 	fmt.Println("\n\n请输入图片保存目录路径和内容抓取类别，默认为首页推荐 ")
 	fmt.Print("\r\n\r\n")
 
