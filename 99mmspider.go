@@ -26,19 +26,17 @@ var (
 )
 
 func main() {
+	fmt.Println("\n欢迎使用本工具，此工具仅限个人使用。")
+	fmt.Println("\n\n请输入图片保存目录路径和内容抓取类别 ")
+	fmt.Println("\n\n类别1 - hot")
+	fmt.Println("类别2 - meitui")
+	fmt.Println("类别3 - xinggan")
+	fmt.Println("类别4 - qingchun")
+	fmt.Print("\n\n")
 
 	for {
-		fmt.Println("\n欢迎使用本工具，此工具仅限个人使用。")
-		fmt.Println("\n\n请输入图片保存目录路径和内容抓取类别 ")
-		fmt.Println("\n\n类别1 - hot")
-		fmt.Println("类别2 - meitui")
-		fmt.Println("类别3 - xinggan")
-		fmt.Println("类别4 - qingchun")
-		fmt.Print("\n\n")
 		fmt.Println("请输入合法的图片保存目录路径（如 /usr/image、E:\\image）：")
 		fmt.Scanln(&basePath)
-		fmt.Println("请输入抓取内容类别编码（数字）：")
-		fmt.Scanln(&cFlag)
 
 		if basePath != "" {
 			_, err := os.Stat(basePath)
@@ -56,6 +54,9 @@ func main() {
 			fmt.Println(err.Error())
 		}
 	}
+
+	fmt.Println("请输入抓取内容类别编码（数字）：")
+	fmt.Scanln(&cFlag)
 
 	cFlag -= 1
 
@@ -92,7 +93,7 @@ func request(url string, referer string) {
 	doc, err := goquery.NewDocumentFromResponse(resp)
 
 	if err != nil {
-		log.Fatalln("Parse page failed, SKIP! ", err.Error())
+		log.Println("Parse page failed, SKIP! ", err.Error())
 		return
 	}
 
@@ -199,7 +200,7 @@ func saveImage(imgUrl string, folder string) {
 	err := os.MkdirAll(path, 0777)
 
 	if err != nil {
-		log.Fatalln("Create dicretory failed! ", err.Error())
+		log.Println("Create dicretory failed! ", err.Error())
 		return
 	}
 
@@ -219,14 +220,14 @@ func saveImage(imgUrl string, folder string) {
 	out, err := os.Create(path)
 
 	if err != nil {
-		log.Fatalln("Create file failed! ", err.Error())
+		log.Println("Create file failed! ", err.Error())
 		return
 	}
 
 	_, err = io.Copy(out, bytes.NewReader(body))
 
 	if err != nil {
-		log.Fatalln("Save file failed! ", err.Error())
+		log.Println("Save file failed! ", err.Error())
 	} else {
 		log.Println("Saved file: ", path)
 	}
