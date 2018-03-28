@@ -1,22 +1,24 @@
 package main
 
 import (
-	"strings"
-	"net/http"
 	"io/ioutil"
+	"net/http"
+	"os/user"
+	"strings"
+
+	"bytes"
+	"fmt"
+	"io"
+	"log"
+	"math/rand"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"os"
-	"io"
-	"bytes"
-	"sync"
-	"log"
-	"path/filepath"
-	"fmt"
-	"strconv"
-	"time"
-	"regexp"
-	"math/rand"
 )
 
 const baseUrl = "http://www.mzitu.com/"
@@ -44,11 +46,11 @@ var (
 		"最热",
 		"推荐",
 		"专题",
-		"性感妹子",
-		"日本妹子",
-		"台湾妹子",
-		"清纯妹子",
-		"妹子自拍",
+		"性感",
+		"日本",
+		"台湾",
+		"清纯",
+		"自拍",
 	}
 
 	// 浏览器代理
@@ -100,6 +102,7 @@ func main() {
 	for {
 		fmt.Println("请输入合法的图片保存目录路径（如 /usr/image、E:\\image）：")
 		fmt.Scanln(&basePath)
+		basePath = changePathToHomeDir(strings.TrimSpace(basePath))
 
 		if basePath != "" {
 			_, err := os.Stat(basePath)
@@ -118,9 +121,9 @@ func main() {
 		}
 	}
 
-	fmt.Println("请输入抓取内容类别编码（数字）：")
+	fmt.Println("请输入抓取内容类别编码（数字，默认为 0）：")
 	fmt.Scanln(&cFlag)
-	fmt.Println("请输入起始抓取页码（数字）：")
+	fmt.Println("请输入起始抓取页码（数字，默认为 1）：")
 	fmt.Scanln(&cPage)
 
 	if cFlag < 0 || cFlag > flagLen-1 {
@@ -226,6 +229,7 @@ func execute(task *Task) error {
 
 		var index = 0
 		var nextPage string
+		// 使用此循环方式来避免无法直接获取到 nav 元素
 		currentNode.Children().Each(func(i int, s *goquery.Selection) {
 			if index == 0 {
 				s.Find("li>a").Each(func(idx int, sel *goquery.Selection) {
@@ -275,6 +279,7 @@ func execute(task *Task) error {
 	return err
 }
 
+// 请求指定的 task
 func request(task *Task) (*http.Response, error) {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", task.Url, nil)
@@ -298,6 +303,7 @@ func request(task *Task) (*http.Response, error) {
 	return client.Do(req)
 }
 
+// 保存图片资源，分目录层次
 func saveImage(pageUrl string, imgUrl string, folder string) {
 	fragment := strings.TrimPrefix(pageUrl, baseUrl)
 	fragments := strings.Split(fragment, "/")
@@ -333,6 +339,7 @@ func saveImage(pageUrl string, imgUrl string, folder string) {
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
+		log.Println("Read response faield! ", err.Error())
 		return
 	}
 
@@ -342,21 +349,22 @@ func saveImage(pageUrl string, imgUrl string, folder string) {
 		return
 	}
 
-	_, err = io.Copy(out, bytes.NewReader(body))
+	bs, err := io.Copy(out, bytes.NewReader(body))
 	if err != nil {
 		log.Println("Save file failed! ", err.Error())
 	} else {
-		log.Println("Saved file: ", p)
+		log.Printf("Saved file [%d] bytes : %s", bs, p)
 	}
 }
 
+// 失败重试判断
 func retry(task *Task) error {
-	if task.Retry < maxRetry {
-		task.Retry++
-		time.Sleep(time.Duration(2) * time.Second)
-		return execute(task)
+	if task.Retry >= maxRetry {
+		return fmt.Errorf("invalid page %s", task.Url)
 	}
-	return fmt.Errorf("invalid page %s", task.Url)
+	task.Retry++
+	time.Sleep(time.Duration(2) * time.Second)
+	return execute(task)
 }
 
 // 过滤非法文件名
@@ -367,4 +375,16 @@ func filterFilename(name string) string {
 		return name
 	}
 	return reg.ReplaceAllString(name, "_")
+}
+
+// 把用户输入的保存路径中的 ~ 符号替换为当前用户目录
+func changePathToHomeDir(path string) string {
+	if strings.Index(path, "~") != 0 {
+		return path
+	}
+	u, err := user.Current()
+	if err != nil {
+		return path
+	}
+	return u.HomeDir + path[1:]
 }
