@@ -103,11 +103,8 @@ func main() {
 		fmt.Println("请输入合法的图片保存目录路径（如 /usr/image、E:\\image）：")
 		fmt.Scanln(&basePath)
 		basePath = changePathToHomeDir(strings.TrimSpace(basePath))
-
 		if basePath != "" {
-			_, err := os.Stat(basePath)
-
-			if err == nil {
+			if _, err := os.Stat(basePath); err == nil {
 				break
 			}
 
@@ -125,18 +122,15 @@ func main() {
 	fmt.Scanln(&cFlag)
 	fmt.Println("请输入起始抓取页码（数字，默认为 1）：")
 	fmt.Scanln(&cPage)
-
 	if cFlag < 0 || cFlag > flagLen-1 {
 		cFlag = 0
 	}
 
 	p := flagLabel[cFlag]
 	url := baseUrl
-
 	if p != "" {
 		url += p + "/"
 	}
-
 	if cPage > 0 {
 		url += "page/" + strconv.Itoa(cPage)
 	}
@@ -158,7 +152,6 @@ func main() {
 
 func execute(task *Task) error {
 	resp, err := request(task)
-
 	if err != nil {
 		if err = retry(task); err != nil {
 			return fmt.Errorf("request %s failed, %v", task.Url, err)
@@ -167,7 +160,6 @@ func execute(task *Task) error {
 	}
 
 	doc, err := goquery.NewDocumentFromResponse(resp)
-
 	if err != nil {
 		if err = retry(task); err != nil {
 			return fmt.Errorf("parse page failed, SKIP! %s, %v", task.Url, err.Error())
@@ -176,7 +168,6 @@ func execute(task *Task) error {
 	}
 
 	var currentNode *goquery.Selection
-
 	if currentNode = doc.Find(".main-image"); currentNode.Size() > 0 {
 		imgUrl, _ := currentNode.Find("p img").Attr("src")
 		desc, _ := currentNode.Find("p img").Attr("alt")
@@ -186,9 +177,7 @@ func execute(task *Task) error {
 
 		var nextUrl string
 		selection := doc.Find(".pagenavi").Find("a").Last()
-
 		text := selection.Find("span").Text()
-
 		if strings.TrimSpace(text) == "下一页»" {
 			nextUrl, _ = selection.Attr("href")
 		}
@@ -197,7 +186,6 @@ func execute(task *Task) error {
 		}
 
 		time.Sleep(time.Duration(1) * time.Second)
-
 		err = execute(&Task{
 			Url:    nextUrl,
 			Folder: task.Folder,
@@ -218,7 +206,6 @@ func execute(task *Task) error {
 						Url:    tagLink,
 						Folder: filepath.Join(task.Folder, filterFilename(curTitle), filterFilename(tagAlt)),
 					})
-
 					if e != nil {
 						fmt.Println(e.Error())
 					}
@@ -239,13 +226,11 @@ func execute(task *Task) error {
 					}
 
 					detailUrl = strings.TrimPrefix(detailUrl, "/")
-
 					rwg.Add(1)
 					go func() {
 						defer rwg.Done()
 						// 缓冲执行协程，防止过快一起执行
 						time.Sleep(time.Duration(i) * time.Second)
-
 						e := execute(&Task{
 							Url:    detailUrl,
 							Folder: task.Folder,
@@ -288,7 +273,6 @@ func request(task *Task) (*http.Response, error) {
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.8")
 	req.Header.Set("User-Agent", userAgents[r.Intn(userAgentsLen)])
 	if task.Referer != "" {
@@ -307,19 +291,16 @@ func request(task *Task) (*http.Response, error) {
 func saveImage(pageUrl string, imgUrl string, folder string) {
 	fragment := strings.TrimPrefix(pageUrl, baseUrl)
 	fragments := strings.Split(fragment, "/")
-	fragLen := len(fragments)
 	idx := "1"
-
+	fragLen := len(fragments)
 	if fragLen == 0 {
 		return
 	}
-
-	folder = strings.TrimSpace(folder) + "_" + fragments[0]
-
 	if fragLen > 1 {
 		idx = fragments[1]
 	}
 
+	folder = strings.TrimSpace(folder) + "_" + fragments[0]
 	p := filepath.Join(basePath, folder)
 	err := os.MkdirAll(p, 0777)
 	if err != nil {
@@ -353,7 +334,7 @@ func saveImage(pageUrl string, imgUrl string, folder string) {
 	if err != nil {
 		log.Println("Save file failed! ", err.Error())
 	} else {
-		log.Printf("Saved file [%d] bytes : %s", bs, p)
+		log.Printf("Saved file [%d bytes]: %s", bs, p)
 	}
 }
 
